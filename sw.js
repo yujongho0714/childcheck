@@ -1,7 +1,7 @@
 /* 정도태권도 출석부 서비스워커 - 한 번 받은 파일을 폰에 저장해두고 다음부터는 데이터 없이 엽니다.
    화면 파일(index.html)은 열 때마다 "바뀌었는지"만 조용히 확인하고, 바뀌었으면 다음번 실행부터 새 버전이 보입니다. */
-const CACHE = 'attendance-v2';
-const SHELL = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png'];
+const CACHE = 'attendance-v4';   // v4: 백지 오류 고친 버전 (폰에 남은 옛 저장본은 자동으로 지워짐)
+const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

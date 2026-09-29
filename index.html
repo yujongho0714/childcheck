@@ -19,8 +19,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="출석부">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
-<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <script id="a2hs-script">
 /* [홈 화면 추가] 폰 브라우저에서 이 페이지를 바탕화면(홈 화면) 아이콘으로 추가하도록 안내하는 기능.
    - 크롬/삼성인터넷 등 설치 팝업을 지원하는 브라우저: 버튼 한 번으로 바로 추가
@@ -164,7 +164,7 @@
   function mkBtn(){
     var b = document.createElement('div');
     b.setAttribute('data-a2hs', 'btn');
-    b.style.cssText = 'position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:2147483645;display:flex;align-items:center;background:' + CFG.c2 + ';color:' + CFG.fg + ';border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-family:Pretendard,"Noto Sans KR",sans-serif;font-size:13px;font-weight:800;overflow:hidden;user-select:none;-webkit-user-select:none;';
+    b.style.cssText = 'position:fixed;right:12px;bottom:calc(78px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;align-items:center;background:' + CFG.c2 + ';color:' + CFG.fg + ';border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-family:Pretendard,"Noto Sans KR",sans-serif;font-size:13px;font-weight:800;overflow:hidden;user-select:none;-webkit-user-select:none;';
     b.innerHTML = '<span data-a2hs-go style="padding:10px 6px 10px 14px;">📲 홈 화면에 추가</span><span data-a2hs-x style="padding:10px 12px 10px 6px;opacity:.7;font-size:15px;">✕</span>';
     b.addEventListener('click', function(e){
       if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-a2hs-x')) {
@@ -1565,6 +1565,7 @@ function App() {
     });
   }, []);
 
+  const backupFnRef = React.useRef(null);   // 전체 백업 만드는 함수 보관함 (아래 buildFullBackupPayload가 채움)
   const checkIn = useCallback(async (id, label, timeband) => {
     const t = new Date();
     const time = `${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
@@ -1572,7 +1573,9 @@ function App() {
       const next = { ...prev, [id]: { time, timeband: timeband || '' } };
       storageSetJSON('att-' + todayKey, next).then(ok => {
         if (!ok) { setSaveError('출석 저장에 실패했어요. 다시 눌러주세요.'); return; }
-        maybeAutoBackupToFile(buildFullBackupPayload); // 오늘 첫 저장이면 조용히 백업 파일을 다운로드 폴더에 남겨둔다
+        // 오늘 첫 저장이면 조용히 백업 파일을 다운로드 폴더에 남겨둔다
+        // (백업 만드는 함수는 아래쪽에서 정의돼서, 출석할 때 보관함(ref)에서 꺼내 씀 → 화면을 그릴 때 순서 오류로 백지가 되던 문제 해결)
+        maybeAutoBackupToFile(() => (backupFnRef.current ? backupFnRef.current() : Promise.reject(new Error('백업 준비 전'))));
       });
       return next;
     });
@@ -1586,7 +1589,7 @@ function App() {
     }
     setToast(`${label} 출석 완료 · ${time}${timeband ? ' · ' + timeband : ''}`);
     setTimeout(() => setToast(''), 2200);
-  }, [todayKey, manualEditDate, buildFullBackupPayload]);
+  }, [todayKey, manualEditDate]);
 
   const undoCheckIn = useCallback(async (id) => {
     setTodayAttendance(prev => {
@@ -1938,6 +1941,7 @@ function App() {
       attendanceByDate,
     };
   }, [students, meta, closures, absences, enrollments, todayKey, todayAttendance]);
+  backupFnRef.current = buildFullBackupPayload;   // 출석 체크(checkIn)가 꺼내 쓰는 보관함
 
   // ---- 전체 백업 공유(카카오톡/문자로 텍스트 보내기) ----
   const shareFullBackup = useCallback(async () => {
