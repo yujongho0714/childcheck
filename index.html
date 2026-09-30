@@ -1565,6 +1565,8 @@ function App() {
     });
   }, []);
 
+  // buildFullBackupPayload는 아래쪽에서 정의되므로, checkIn에서는 ref를 통해 (정의된 뒤에) 안전하게 호출한다.
+  const buildBackupRef = React.useRef(null);
   const checkIn = useCallback(async (id, label, timeband) => {
     const t = new Date();
     const time = `${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
@@ -1572,7 +1574,7 @@ function App() {
       const next = { ...prev, [id]: { time, timeband: timeband || '' } };
       storageSetJSON('att-' + todayKey, next).then(ok => {
         if (!ok) { setSaveError('출석 저장에 실패했어요. 다시 눌러주세요.'); return; }
-        maybeAutoBackupToFile(buildFullBackupPayload); // 오늘 첫 저장이면 조용히 백업 파일을 다운로드 폴더에 남겨둔다
+        maybeAutoBackupToFile(() => buildBackupRef.current && buildBackupRef.current()); // 오늘 첫 저장이면 조용히 백업 파일을 다운로드 폴더에 남겨둔다
       });
       return next;
     });
@@ -1586,7 +1588,7 @@ function App() {
     }
     setToast(`${label} 출석 완료 · ${time}${timeband ? ' · ' + timeband : ''}`);
     setTimeout(() => setToast(''), 2200);
-  }, [todayKey, manualEditDate, buildFullBackupPayload]);
+  }, [todayKey, manualEditDate]);
 
   const undoCheckIn = useCallback(async (id) => {
     setTodayAttendance(prev => {
@@ -1999,6 +2001,7 @@ function App() {
       attendanceByDate,
     };
   }, [students, meta, closures, absences, enrollments, todayKey, todayAttendance]);
+  buildBackupRef.current = buildFullBackupPayload;
 
   // ---- 전체 백업 공유(카카오톡/문자로 텍스트 보내기) ----
   const shareFullBackup = useCallback(async () => {
