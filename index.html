@@ -164,7 +164,7 @@
   function mkBtn(){
     var b = document.createElement('div');
     b.setAttribute('data-a2hs', 'btn');
-    b.style.cssText = 'position:fixed;right:12px;bottom:calc(78px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;align-items:center;background:' + CFG.c2 + ';color:' + CFG.fg + ';border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-family:Pretendard,"Noto Sans KR",sans-serif;font-size:13px;font-weight:800;overflow:hidden;user-select:none;-webkit-user-select:none;';
+    b.style.cssText = 'position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:2147483645;display:flex;align-items:center;background:' + CFG.c2 + ';color:' + CFG.fg + ';border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-family:Pretendard,"Noto Sans KR",sans-serif;font-size:13px;font-weight:800;overflow:hidden;user-select:none;-webkit-user-select:none;';
     b.innerHTML = '<span data-a2hs-go style="padding:10px 6px 10px 14px;">📲 홈 화면에 추가</span><span data-a2hs-x style="padding:10px 12px 10px 6px;opacity:.7;font-size:15px;">✕</span>';
     b.addEventListener('click', function(e){
       if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-a2hs-x')) {
@@ -1565,7 +1565,6 @@ function App() {
     });
   }, []);
 
-  const backupFnRef = React.useRef(null);   // 전체 백업 만드는 함수 보관함 (아래 buildFullBackupPayload가 채움)
   const checkIn = useCallback(async (id, label, timeband) => {
     const t = new Date();
     const time = `${pad2(t.getHours())}:${pad2(t.getMinutes())}`;
@@ -1573,9 +1572,7 @@ function App() {
       const next = { ...prev, [id]: { time, timeband: timeband || '' } };
       storageSetJSON('att-' + todayKey, next).then(ok => {
         if (!ok) { setSaveError('출석 저장에 실패했어요. 다시 눌러주세요.'); return; }
-        // 오늘 첫 저장이면 조용히 백업 파일을 다운로드 폴더에 남겨둔다
-        // (백업 만드는 함수는 아래쪽에서 정의돼서, 출석할 때 보관함(ref)에서 꺼내 씀 → 화면을 그릴 때 순서 오류로 백지가 되던 문제 해결)
-        maybeAutoBackupToFile(() => (backupFnRef.current ? backupFnRef.current() : Promise.reject(new Error('백업 준비 전'))));
+        maybeAutoBackupToFile(buildFullBackupPayload); // 오늘 첫 저장이면 조용히 백업 파일을 다운로드 폴더에 남겨둔다
       });
       return next;
     });
@@ -1589,7 +1586,7 @@ function App() {
     }
     setToast(`${label} 출석 완료 · ${time}${timeband ? ' · ' + timeband : ''}`);
     setTimeout(() => setToast(''), 2200);
-  }, [todayKey, manualEditDate]);
+  }, [todayKey, manualEditDate, buildFullBackupPayload]);
 
   const undoCheckIn = useCallback(async (id) => {
     setTodayAttendance(prev => {
@@ -1606,6 +1603,67 @@ function App() {
       if (manualEditDate === todayKey) setManualForDate(all[todayKey] || {});
     }
   }, [todayKey, manualEditDate]);
+
+  // ---- 심사 프로그램에서 내보낸 "오늘 출석" 파일을 불러와 시간반에 맞춰 한꺼번에 출석 처리 ----
+  // 실제 체크인(checkIn)과 똑같이 att-날짜 키에 { time, timeband }로 저장한다. 이미 출석한 학생은 건드리지 않는다.
+  const importExamAttendance = useCallback(async (file) => {
+    if (!file) return;
+    let data;
+    try { data = JSON.parse(await file.text()); } catch (e) { data = null; }
+    const validDate = data && typeof data.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.date);
+    if (!data || data.app !== 'promotion-exam-attendance' || !validDate || !Array.isArray(data.records)) {
+      alert('심사 프로그램에서 내보낸 "오늘 출석" 파일이 아니에요.\n심사 프로그램의 [📤 오늘 출석 내보내기] 버튼으로 만든 JSON 파일을 선택해주세요.');
+      return;
+    }
+    const date = data.date;
+    if (date !== todayKey && !window.confirm(`파일의 날짜(${date})가 오늘(${todayKey})과 달라요.\n${date} 날짜로 출석 처리할까요?`)) return;
+
+    const list = students || [];
+    const picks = {};      // { studentId: timeband }
+    const notFound = [];
+    data.records.forEach(rec => {
+      const base = String((rec && rec.name) || '').replace(/\s*\(.*\)\s*$/, '').trim();
+      let cands = list.filter(s => s.name === base);
+      if (cands.length > 1 && rec.grade) {
+        const byGrade = cands.filter(s => s.grade === rec.grade);
+        if (byGrade.length) cands = byGrade;
+      }
+      if (cands.length === 1 && TIMEBANDS.includes(rec.timeband)) picks[cands[0].id] = rec.timeband;
+      else notFound.push(rec && rec.name ? rec.name : '(이름 없음)');
+    });
+
+    const existing = date === todayKey ? todayAttendance : ((await storageGetJSON('att-' + date)) || {});
+    const next = { ...existing };
+    let added = 0, already = 0;
+    Object.keys(picks).forEach(id => {
+      if (existing[id]) { already++; return; }
+      next[id] = { time: '', timeband: picks[id] };
+      added++;
+    });
+
+    if (added > 0) {
+      const ok = await storageSetJSON('att-' + date, next);
+      if (!ok) { setSaveError('출석 저장에 실패했어요. 다시 시도해주세요.'); return; }
+      if (date === todayKey) setTodayAttendance(next);
+      // checkIn과 마찬가지로, 새로 출석 처리된 학생에게 남아 있던 그 날짜의 수동 오버라이드(예: 미등원)는 지운다.
+      const allManual = await loadAllManualAttendance();
+      const forDate = { ...(allManual[date] || {}) };
+      let changed = false;
+      Object.keys(picks).forEach(id => {
+        if (!existing[id] && forDate[id]) { delete forDate[id]; changed = true; }
+      });
+      if (changed) {
+        const nextManual = { ...allManual, [date]: forDate };
+        if (await storageSetJSON(MANUAL_ATTENDANCE_KEY, nextManual)) {
+          if (date === todayKey) setTodayManualForDate(forDate);
+          if (manualEditDate === date) setManualForDate(forDate);
+        }
+      }
+    }
+    setToast(`심사 출석 ${added}명 처리 완료` + (already ? ` · 이미 출석 ${already}명` : ''));
+    setTimeout(() => setToast(''), 3200);
+    if (notFound.length) alert(`출석부에서 찾지 못한 이름이 ${notFound.length}명 있어요:\n${notFound.join(', ')}\n\n이름이 다르거나 원생 목록에 없는 경우예요. 이 학생들은 직접 출석 체크해주세요.`);
+  }, [students, todayKey, todayAttendance, manualEditDate]);
 
   // ---- [수동 출결 수정 - Part 2] 특정 날짜/학생의 수동 출결 오버라이드 저장/해제 ----
   // 실제 읽기/쓰기는 위쪽 데이터 레이어 함수(saveManualAttendanceRecord 등)가 전담하고,
@@ -1941,7 +1999,6 @@ function App() {
       attendanceByDate,
     };
   }, [students, meta, closures, absences, enrollments, todayKey, todayAttendance]);
-  backupFnRef.current = buildFullBackupPayload;   // 출석 체크(checkIn)가 꺼내 쓰는 보관함
 
   // ---- 전체 백업 공유(카카오톡/문자로 텍스트 보내기) ----
   const shareFullBackup = useCallback(async () => {
@@ -2629,6 +2686,7 @@ function App() {
             metaOf={metaOf} onCheckIn={checkIn} onUndo={undoCheckIn}
             todayCount={checkedInList.length}
             onShareAttendance={shareTodayAttendance}
+            onImportExamAttendance={importExamAttendance}
           />
         )}
         {tab === 'absent' && (
@@ -2807,7 +2865,8 @@ function NavBtn({ active, onClick, label, icon, badge }) {
   );
 }
 
-function CheckTab({ selectedBand, setSelectedBand, selectedGrade, setSelectedGrade, selectedCho, setSelectedCho, checkList, checkedInList, metaOf, onCheckIn, onUndo, todayCount, onShareAttendance }) {
+function CheckTab({ selectedBand, setSelectedBand, selectedGrade, setSelectedGrade, selectedCho, setSelectedCho, checkList, checkedInList, metaOf, onCheckIn, onUndo, todayCount, onShareAttendance, onImportExamAttendance }) {
+  const examFileRef = React.useRef(null);
   const [showCheckedIn, setShowCheckedIn] = useState(false);
   const [bandWarning, setBandWarning] = useState(false);
   const [confirmStudent, setConfirmStudent] = useState(null); // 이름을 눌렀을 때 "출석 확인" 팝업을 띄울 대상 학생
@@ -2880,6 +2939,9 @@ function CheckTab({ selectedBand, setSelectedBand, selectedGrade, setSelectedGra
             {showCheckedIn ? '접기 ▲' : '목록 보기 ▼'}
           </button>
           <button style={S.shareBtn} onClick={onShareAttendance}>💬 카톡으로 공유</button>
+          <button style={S.linkBtn} onClick={() => examFileRef.current && examFileRef.current.click()}>📥 심사 출석 불러오기</button>
+          <input ref={examFileRef} type="file" accept="application/json,.json" style={S.hiddenCheckbox}
+            onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) onImportExamAttendance(f); }} />
         </div>
         {showCheckedIn && (
           <div style={S.checkedInList}>
